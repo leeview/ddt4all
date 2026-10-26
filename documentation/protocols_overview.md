@@ -218,7 +218,39 @@ Common ELM protocol numbers: `3` ISO 9141-2, `4` ISO 14230 slow init, `5` ISO 14
 - Writing parameters, coding or reprogramming can permanently affect vehicle behaviour. Do it only with stable power and a good adapter.
 - Broadcasting wake-up/session frames on a live bus can disturb running ECUs; prefer scanning with the ignition on and the engine off.
 
-## 10. Further reading
+## 10. Further reading and sources
 
-- ISO 11898 (CAN), ISO 15765 (CAN transport + diagnostics), ISO 14229 (UDS), ISO 14230 (KWP2000), ISO 9141, ISO 13400 (DoIP), SAE J1979 / J1962.
-- ELM327 datasheet (Elm Electronics) for the AT command set.
+### Standards (paid documents; the pages give scope and abstracts)
+- ISO 11898 – CAN: https://www.iso.org/standard/63648.html
+- ISO 15765-2 – ISO-TP transport protocol: https://www.iso.org/standard/66574.html
+- ISO 14229-1 – UDS: https://www.iso.org/standard/72439.html
+- ISO 14230 – KWP2000: https://www.iso.org/standard/46000.html
+- ISO 9141 – K-line: https://www.iso.org/standard/16738.html
+- ISO 13400-2 – DoIP: https://www.iso.org/standard/74785.html
+- SAE J1979 (OBD-II modes) and J1962 (connector): https://www.sae.org/standards/
+
+### Free tutorials and references
+- ELM327 datasheet and AT command set (Elm Electronics): https://www.elmelectronics.com/ic/elm327/
+- OBDLink / ScanTool.net ST command reference: https://www.scantool.net/
+- CSS Electronics tutorials (CAN, ISO-TP, UDS, OBD2, DoIP): https://www.csselectronics.com/pages/can-bus-simple-intro-tutorial
+- Wikipedia overviews:
+  - OBD-II PIDs: https://en.wikipedia.org/wiki/OBD-II_PIDs
+  - On-board diagnostics: https://en.wikipedia.org/wiki/On-board_diagnostics
+  - CAN bus: https://en.wikipedia.org/wiki/CAN_bus
+  - ISO-TP: https://en.wikipedia.org/wiki/ISO_15765-2
+  - UDS: https://en.wikipedia.org/wiki/Unified_Diagnostic_Services
+  - KWP2000: https://en.wikipedia.org/wiki/Keyword_Protocol_2000
+  - DoIP: https://en.wikipedia.org/wiki/Diagnostics_over_IP
+
+### Open-source implementations worth reading
+- python-can: https://python-can.readthedocs.io/
+- can-isotp (Python ISO-TP): https://can-isotp.readthedocs.io/
+- udsoncan (Python UDS client): https://udsoncan.readthedocs.io/
+- doipclient (Python DoIP): https://github.com/jacobschaer/python-doipclient
+- Linux SocketCAN and kernel ISO-TP: https://www.kernel.org/doc/html/latest/networking/can.html
+- python-OBD: https://python-obd.readthedocs.io/
+
+### In this repository
+- [overview.md](overview.md) – software structure
+- `documentation/ddt4all/core/elm/`, `core/doip/`, `core/usbdevice/` – module references
+- `documentation/obdlink/` – OBDLink notes
