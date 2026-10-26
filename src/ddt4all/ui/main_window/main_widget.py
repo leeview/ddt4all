@@ -856,18 +856,28 @@ class MainWidget(widgets.QMainWindow):
                     self.changeECU(index)
                     break
 
+    def _run_scan_safely(self, scan_func, *args):
+        try:
+            scan_func(*args)
+            return True
+        except Exception as e:
+            self.logview.append("<font color='red'>%s: %s</font>" % (_("Scan failed"), e))
+            widgets.QMessageBox.warning(self, version.__appname__, "%s: %s" % (_("Scan failed"), e))
+            return False
+
     def scan_project(self, project):
         if project == "ALL":
             self.scan()
             return
         self.ecu_scan.clear()
         self.logview.append(_("Scanning CAN") + " -> " + project)
-        self.ecu_scan.scan(self.progressstatus, self.infostatus, project)
-        self.logview.append(_("Scanning KWP") + " -> " + project)
-        self.ecu_scan.scan_kwp(self.progressstatus, self.infostatus, project)
-        if options.configuration.get('doip_scan', True):
+        ok = self._run_scan_safely(self.ecu_scan.scan, self.progressstatus, self.infostatus, project)
+        if ok:
+            self.logview.append(_("Scanning KWP") + " -> " + project)
+            ok = self._run_scan_safely(self.ecu_scan.scan_kwp, self.progressstatus, self.infostatus, project)
+        if ok and options.configuration.get('doip_scan', True):
             self.logview.append(_("Scanning DoIP") + " -> " + project)
-            self.ecu_scan.scan_doip(self.progressstatus, self.infostatus, project)
+            self._run_scan_safely(self.ecu_scan.scan_doip, self.progressstatus, self.infostatus, project)
 
         for ecu in self.ecu_scan.ecus.keys():
             self.ecunamemap[ecu] = self.ecu_scan.ecus[ecu].name
@@ -935,11 +945,12 @@ class MainWidget(widgets.QMainWindow):
 
         self.ecu_scan.clear()
         if scancan:
-            self.ecu_scan.scan(self.progressstatus, self.infostatus, None, self.canlinecombo.currentIndex())
+            self._run_scan_safely(self.ecu_scan.scan, self.progressstatus, self.infostatus, None,
+                                  self.canlinecombo.currentIndex())
         if scankwp:
-            self.ecu_scan.scan_kwp(self.progressstatus, self.infostatus)
+            self._run_scan_safely(self.ecu_scan.scan_kwp, self.progressstatus, self.infostatus)
         if scandoip and options.configuration.get('doip_scan', True):
-            self.ecu_scan.scan_doip(self.progressstatus, self.infostatus)
+            self._run_scan_safely(self.ecu_scan.scan_doip, self.progressstatus, self.infostatus)
 
         self.treeview_ecu.clear()
         self.treeview_params.clear()

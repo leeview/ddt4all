@@ -19,6 +19,7 @@ class EcuScanner:
         self.num_ecu_found = 0
         self.report_data = []
         self.qapp = None
+        self.current_doip_device = None
 
     def getNumEcuDb(self):
         return self.ecu_database.numecu
@@ -52,7 +53,7 @@ class EcuScanner:
             # Give scanner something to eat...
             if addr == "04":
                 can_response = "61 80 30 36 32 36 52 35 37 31 31 35 32 31 36 52 01 99 00 00 00 00 02 00 00 88"
-            if addr == "51":
+            elif addr == "51":
                 can_response = "61 80 82 00 45 15 05 08 32 31 33 21 11 31 39 09 00 09 06 02 05 01 0D 8D 39 00"
             elif addr == "7A":
                 # Test approximate case
@@ -62,7 +63,10 @@ class EcuScanner:
         else:
             can_response = options.elm.request(req='2180', positive='61', cache=False)
 
-        self.check_ecu(can_response, label, addr, "CAN")
+        try:
+            self.check_ecu(can_response, label, addr, "CAN")
+        except Exception as e:
+            print(_("Error parsing ECU response at address %(addr)s: %(err)s") % {"addr": addr, "err": e})
 
         # Return ECU to default session so it stops broadcasting and doesn't
         # corrupt the next diagnostic connection (e.g. opening a screen after scan).
@@ -150,7 +154,7 @@ class EcuScanner:
                 # accessbbitity blue color for reason in window bad reader
                 line = f"<font color='blue'>{text} {ecu_type} {text1} :" \
                        "%s DIAGVERSION [%s] SUPPLIER [%s] SOFT [%s] VERSION [%s instead %s]</font>" \
-                       % (kept_ecu.name, diagversion, supplier, soft, version, tgt.version)
+                       % (kept_ecu.name, diagversion, supplier, soft, version, kept_ecu.version)
 
                 options.main_window.logview.append(line)
 
@@ -171,6 +175,20 @@ class EcuScanner:
             pass
 
     def identify_new(self, addr, label):
+        try:
+            return self._identify_new(addr, label)
+        except Exception as e:
+            print(_("Error identifying ECU at address %(addr)s: %(err)s") % {"addr": addr, "err": e})
+            if not options.simulation_mode:
+                self._close_uds_session()
+            return False
+
+    def _addr_name(self, addr):
+        mapping_long = self.ecu_database.addr_group_mapping_long
+        mapping = self.ecu_database.addr_group_mapping
+        return mapping_long.get(addr) or mapping.get(addr) or "UNKNOWN"
+
+    def _identify_new(self, addr, label):
         diagversion = ""
         supplier = ""
         soft_version = ''
@@ -304,14 +322,31 @@ class EcuScanner:
         self._close_uds_session()
         return True
 
+    def _close_elm_protocol(self):
+        if options.simulation_mode or not getattr(options, 'elm', None):
+            return
+        try:
+            options.elm.close_protocol()
+        except Exception as e:
+            print(_("Error closing protocol: %s") % e)
+
+    def _process_events(self):
+        if self.qapp:
+            self.qapp.processEvents()
+
     def scan(self, progress=None, label=None, vehiclefilter=None, canline=0):
+        try:
+            self._scan(progress, label, vehiclefilter, canline)
+        finally:
+            self._close_elm_protocol()
+
+    def _scan(self, progress=None, label=None, vehiclefilter=None, canline=0):
         i = 0
         if not options.simulation_mode:
-            # Use integrated DeviceManager for enhanced features
-            if hasattr(options, 'elm') and options.elm:
-                # Initialize device with enhanced features using selected adapter type
-                device_type = options.elm.adapter_type
-                elm.DeviceManager.initialize_device(options.elm, device_type)
+            if not getattr(options, 'elm', None):
+                raise RuntimeError(_("No diagnostic adapter connected"))
+            # Initialize device with enhanced features using selected adapter type
+            elm.DeviceManager.initialize_device(options.elm, options.elm.adapter_type)
 
             options.elm.init_can()
 
@@ -336,7 +371,7 @@ class EcuScanner:
             i += 1
             if progress:
                 progress.setValue(i)
-                self.qapp.processEvents()
+                self._process_events()
 
             # Don't want to scan NON ISO-TP
             if addr == '00' or addr == 'FF':
@@ -347,25 +382,26 @@ class EcuScanner:
                 continue
 
             text = _("Scanning address: ")
+            print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self._addr_name(addr)})
+
             try:
-                # Try long name first
-                print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self.ecu_database.addr_group_mapping_long[addr]})
-            except KeyError:
-                # If not, short name
-                print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self.ecu_database.addr_group_mapping[addr]})
+                if not options.simulation_mode:
+                    options.elm.init_can()
+                    options.elm.set_can_addr(addr, {'ecuname': 'SCAN'}, canline)
 
-            if not options.simulation_mode:
-                options.elm.init_can()
-                options.elm.set_can_addr(addr, {'ecuname': 'SCAN'}, canline)
-
-            # Avoid to waste time, try new method : not working -> try old
-            if not self.identify_new(addr, label):
-                self.identify_old(addr, label)
-
-        if not options.simulation_mode:
-            options.elm.close_protocol()
+                # Avoid to waste time, try new method : not working -> try old
+                if not self.identify_new(addr, label):
+                    self.identify_old(addr, label)
+            except Exception as e:
+                print(_("Error scanning address %(addr)s: %(err)s") % {"addr": addr, "err": e})
 
     def scan_kwp(self, progress=None, label=None, vehiclefilter=None):
+        try:
+            self._scan_kwp(progress, label, vehiclefilter)
+        finally:
+            self._close_elm_protocol()
+
+    def _scan_kwp(self, progress=None, label=None, vehiclefilter=None):
         if options.simulation_mode:
             # Test data..
             # diagversion, supplier, soft, version, name, group, href, protocol, projects, address):
@@ -373,11 +409,10 @@ class EcuScanner:
                                                         "S2000_Atmo___SoftA3.json",
                                                         "KWP2000 FastInit MonoPoint", [], "7A")
         else:
-            # Use integrated DeviceManager for enhanced features
-            if hasattr(options, 'elm') and options.elm:
-                # Initialize device with enhanced features using selected adapter type
-                device_type = options.elm.adapter_type
-                elm.DeviceManager.initialize_device(options.elm, device_type)
+            if not getattr(options, 'elm', None):
+                raise RuntimeError(_("No diagnostic adapter connected"))
+            # Initialize device with enhanced features using selected adapter type
+            elm.DeviceManager.initialize_device(options.elm, options.elm.adapter_type)
 
             options.elm.init_iso()
 
@@ -402,46 +437,49 @@ class EcuScanner:
             i += 1
             if progress:
                 progress.setValue(i)
-                self.qapp.processEvents()
+                self._process_events()
 
             text = _("Scanning address: ")
+            print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self._addr_name(addr)})
+
             try:
-                # Try long name first
-                print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self.ecu_database.addr_group_mapping_long[addr]})
-            except KeyError:
-                # If not, short name
-                print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self.ecu_database.addr_group_mapping[addr]})
-
-            if not options.simulation_mode:
-                options.opt_si = True
-                if not options.elm.set_iso_addr(addr,
-                                                {'idTx': '', 'idRx': '',
-                                                 'ecuname': 'SCAN',
-                                                 'protocol': "KWP2000"}):
-                    continue
-                options.elm.start_session_iso('10C0')
-                can_response = options.elm.request(req='2180', positive='61', cache=False)
-            else:
-                # Send some data collected during my tests
-                if addr == "02":
-                    can_response = "61 80 77 00 31 38 31 04 41 42 45 E3 17 03 00 38 00 07 00 00 00 00 09 11 12 00"
-                elif addr == "7A":
-                    can_response = "61 80 82 00 23 66 18 14 30 33 37 82 00 08 53 86 00 CB A4 00 70 06 3C 02 B1 A4"
-                elif addr == "26":
-                    can_response = "61 80 82 00 03 27 76 00 32 31 33 11 01 10 30 08 00 66 00 00 00 41 06 01 F1 38"
+                if not options.simulation_mode:
+                    options.opt_si = True
+                    if not options.elm.set_iso_addr(addr,
+                                                    {'idTx': '', 'idRx': '',
+                                                     'ecuname': 'SCAN',
+                                                     'protocol': "KWP2000"}):
+                        continue
+                    options.elm.start_session_iso('10C0')
+                    can_response = options.elm.request(req='2180', positive='61', cache=False)
                 else:
-                    continue
+                    # Send some data collected during my tests
+                    if addr == "02":
+                        can_response = "61 80 77 00 31 38 31 04 41 42 45 E3 17 03 00 38 00 07 00 00 00 00 09 11 12 00"
+                    elif addr == "7A":
+                        can_response = "61 80 82 00 23 66 18 14 30 33 37 82 00 08 53 86 00 CB A4 00 70 06 3C 02 B1 A4"
+                    elif addr == "26":
+                        can_response = "61 80 82 00 03 27 76 00 32 31 33 11 01 10 30 08 00 66 00 00 00 41 06 01 F1 38"
+                    else:
+                        continue
 
-            self.check_ecu(can_response, label, addr, "KWP")
-        if not options.simulation_mode:
-            options.elm.close_protocol()
+                self.check_ecu(can_response, label, addr, "KWP")
+            except Exception as e:
+                print(_("Error scanning address %(addr)s: %(err)s") % {"addr": addr, "err": e})
 
     def check_ecu(self, can_response, label, addr, protocol):
+        if not can_response:
+            return
+
         if len(can_response) > 59:
-            diagversion = str(int(can_response[21:23], 16))
-            supplier = bytes.fromhex(can_response[24:32].replace(' ', '')).decode('utf-8')
-            soft = can_response[48:53].replace(' ', '')
-            version = can_response[54:59].replace(' ', '')
+            try:
+                diagversion = str(int(can_response[21:23], 16))
+                supplier = bytes.fromhex(can_response[24:32].replace(' ', '')).decode('utf-8', 'ignore')
+                soft = can_response[48:53].replace(' ', '')
+                version = can_response[54:59].replace(' ', '')
+            except ValueError:
+                print(_("Invalid ECU response at address %(addr)s: %(response)s") % {"addr": addr, "response": can_response})
+                return
             self.check_ecu2(diagversion, supplier, soft, version, label, addr, protocol)
 
         elif protocol.upper() == "DOIP" and options.configuration.get('doip_scan', False):
@@ -476,6 +514,12 @@ class EcuScanner:
                     return  # Changed from continue to return since we're not in a loop
 
     def scan_doip(self, progress=None, label=None, vehiclefilter=None):
+        try:
+            self._scan_doip(progress, label, vehiclefilter)
+        finally:
+            self._disconnect_doip()
+
+    def _scan_doip(self, progress=None, label=None, vehiclefilter=None):
         """Scan for DoIP ECUs using ISO 13400 protocol"""
         if not options.configuration.get('doip_scan', False):
             return
@@ -549,17 +593,12 @@ class EcuScanner:
                     print(_("Warning: address %(addr)s is not mapped") % {"addr": addr})
                     continue
             else:
-                # Use database mapping
-                try:
-                    # Try long name first
-                    print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self.ecu_database.addr_group_mapping_long[addr]})
-                except:
-                    print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self.ecu_database.addr_group_mapping[addr]})
+                print(("%(text)s%(addr)s ECU: %(name)s") % {"text": text, "addr": addr.ljust(35), "name": self._addr_name(addr)})
 
             if not options.simulation_mode:
                 try:
                     # Use the independent DoIP device
-                    if hasattr(self, 'current_doip_device') and self.current_doip_device:
+                    if getattr(self, 'current_doip_device', None):
                         # Set target address for DoIP communication
                         self.current_doip_device.target_address = int(addr, 16)
                         
@@ -567,11 +606,11 @@ class EcuScanner:
                         if self.current_doip_device.start_session_can('10C0'):
                             # Send tester present
                             response = self.current_doip_device.request('3E00')
-                            if response and len(response['data']) >= 1:
+                            if isinstance(response, dict) and len(response.get('data', [])) >= 1:
                                 if response['data'][0] == 0x50:  # Positive response
                                     # Send read data request - get actual ECU identification from DDT database
                                     response = self.current_doip_device.request('2180')
-                                    if response and len(response['data']) >= 59:
+                                    if isinstance(response, dict) and len(response.get('data', [])) >= 59:
                                         can_response = ' '.join([f'{b:02X}' for b in response['data']])
                                         # Parse real DoIP response from ECU
                                         self.check_ecu(can_response, label, addr, "DoIP")
@@ -593,14 +632,14 @@ class EcuScanner:
                 # Don't provide fake data - let user know it's simulation
                 print(_("Would connect to DoIP ECU at address %s and read identification data") % addr)
 
-        if not options.simulation_mode:
-            # Clean up DoIP connection
-                try:
-                    # Close DoIP connection
-                    if hasattr(self.current_doip_device, 'disconnect'):
-                        self.current_doip_device.disconnect()
-                    print(_("DoIP connection closed"))
-                except Exception as e:
-                    print(_("Error closing DoIP connection: %s") % e)
-                finally:
-                    self.current_doip_device = None
+    def _disconnect_doip(self):
+        device = getattr(self, 'current_doip_device', None)
+        self.current_doip_device = None
+        if not device:
+            return
+        try:
+            if hasattr(device, 'disconnect'):
+                device.disconnect()
+            print(_("DoIP connection closed"))
+        except Exception as e:
+            print(_("Error closing DoIP connection: %s") % e)
