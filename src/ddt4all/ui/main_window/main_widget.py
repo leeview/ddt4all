@@ -1152,10 +1152,25 @@ class MainWidget(widgets.QMainWindow):
         self.paramview.setRefreshTime(self.refreshtimebox.value())
         self.set_can_combo(self.paramview.ecurequestsparser.ecu_protocol)
 
+    def export_log_to_file(self):
+        text = self.logview.toPlainText()
+        if not text.strip():
+            return
+        try:
+            from datetime import datetime
+            from ddt4all.file_manager import get_config_dir
+            log_dir = Path(get_config_dir()) / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = log_dir / ("ddt4all_log_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt")
+            log_file.write_text(text + "\n", encoding="utf-8")
+        except OSError as e:
+            print("Unable to export log: " + str(e))
+
     def closeEvent(self, event):
         if self.paramview:
             self.paramview.tester_timer.stop()
         self.snifferview.stopthread()
+        self.export_log_to_file()
         super(MainWidget, self).closeEvent(event)
         try:
             del options.elm
