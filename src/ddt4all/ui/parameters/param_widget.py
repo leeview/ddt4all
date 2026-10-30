@@ -1383,19 +1383,50 @@ class ParamWidget(widgets.QWidget):
         self.dtcdialog.setWindowTitle(_("Diagnostic Trouble Codes"))
         dtc_view = widgets.QTextEdit(None)
         dtc_view.setReadOnly(True)
+        dtc_view.setMinimumSize(700, 450)
+        dtc_font = dtc_view.font()
+        dtc_font.setPointSize(max(dtc_font.pointSize(), 10) + 2)
+        dtc_view.setFont(dtc_font)
         layout = widgets.QVBoxLayout()
         self.dtcdialog.setLayout(layout)
+        buttons = widgets.QHBoxLayout()
         clearbutton = widgets.QPushButton(_("Clear ALL DTC"))
-        layout.addWidget(clearbutton)
+        exportbutton = widgets.QPushButton(_("Export to text file"))
+        closebutton = widgets.QPushButton(_("Close"))
+        buttons.addWidget(clearbutton)
+        buttons.addWidget(exportbutton)
+        buttons.addStretch(1)
+        buttons.addWidget(closebutton)
+        layout.addLayout(buttons)
         layout.addWidget(dtc_view)
 
         clearbutton.clicked.connect(self.clearDTC)
+        closebutton.clicked.connect(self.dtcdialog.close)
 
-        html = '<h1 style="color:red">' + _('ECU trouble codes') + '</h1>'
+        text_lines = [_('ECU trouble codes'),
+                      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                      "=" * 40]
+        def export_dtc():
+            default_name = "dtc_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
+            filename = widgets.QFileDialog.getSaveFileName(
+                self.dtcdialog, _("Export DTC"), default_name, _("Text files (*.txt)"))[0]
+            if not filename:
+                return
+            try:
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write("\n".join(text_lines) + "\n")
+            except OSError as e:
+                widgets.QMessageBox.critical(self.dtcdialog, _("Export DTC"), str(e))
+
+        exportbutton.clicked.connect(export_dtc)
+
+        html = '<h1 style="color:#c00000">' + _('ECU trouble codes') + '</h1>'
 
         for dn in range(0, numberofdtc):
-            html += '<h2 style="color:orange">DTC #%i' % dn + "</h2>"
-            html += "<p>"
+            html += '<h2 style="color:#d86800;border-bottom:1px solid #d86800">DTC #%i' % dn + "</h2>"
+            html += '<table cellpadding="4" cellspacing="0" width="100%">'
+            text_lines.append("")
+            text_lines.append("DTC #%i" % dn)
             for k in request.dataitems.keys():
                 # Filter out NDTC, not needed
                 if k == "NDTC":
@@ -1410,10 +1441,13 @@ class ParamWidget(widgets.QWidget):
                 value = int('0x' + value_hex, 16)
 
                 if len(ecu_data.items) > 0 and value in ecu_data.lists:
-                    html += "<u>" + dataitem.name + "</u> : [" + str(value_hex) + "] " + ecu_data.lists[value] + "<br>"
+                    shown = "[" + str(value_hex) + "] " + ecu_data.lists[value]
                 else:
-                    html += "<u>" + dataitem.name + "</u> : " + str(value) + " [" + hex(value) + "]<br>"
-            html += "</p>"
+                    shown = str(value) + " [" + hex(value) + "]"
+                html += ('<tr><td width="40%"><b>' + dataitem.name + '</b></td><td>'
+                         + shown.replace("&", "&amp;").replace("<", "&lt;") + '</td></tr>')
+                text_lines.append("  %s: %s" % (dataitem.name, shown))
+            html += "</table>"
             can_response = can_response[shiftbytecount:]
 
         dtc_view.setHtml(html)
