@@ -153,6 +153,22 @@ class ParamWidget(widgets.QWidget):
                 cat.append(newname)
                 break
 
+    def removeScreen(self, name):
+        for cat in self.categories.values():
+            if name in cat:
+                cat.remove(name)
+        self.xmlscreen.pop(name, None)
+        if self.parser == "json" and self.layoutdict:
+            self.layoutdict.get('screens', {}).pop(name, None)
+        if getattr(self, 'pagename', None) == name:
+            self.pagename = None
+            self.init(None)
+
+    def removeCategory(self, name):
+        for screen in list(self.categories.get(name, [])):
+            self.removeScreen(screen)
+        self.categories.pop(name, None)
+
     def createCategory(self, name):
         self.categories[name] = []
 

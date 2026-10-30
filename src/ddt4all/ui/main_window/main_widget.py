@@ -207,6 +207,8 @@ class MainWidget(widgets.QMainWindow):
         screen_widget.setLayout(treedock_layout)
         self.treeview_params.setHeaderLabels([_("Screens")])
         self.treeview_params.clicked.connect(self.changeScreen)
+        self.treeview_params.setContextMenuPolicy(core.Qt.CustomContextMenu)
+        self.treeview_params.customContextMenuRequested.connect(self.screenListContextMenu)
 
         self.treedock_logs = widgets.QDockWidget(self)
         self.treedock_logs.setWindowTitle(_("Logs Window"))
@@ -219,6 +221,8 @@ class MainWidget(widgets.QMainWindow):
         self.treeview_ecu = widgets.QListWidget(self.treedock_ecu)
         self.treedock_ecu.setWidget(self.treeview_ecu)
         self.treeview_ecu.clicked.connect(self.changeECU)
+        self.treeview_ecu.setContextMenuPolicy(core.Qt.CustomContextMenu)
+        self.treeview_ecu.customContextMenuRequested.connect(self.ecuListContextMenu)
         
         self.ecunamemap = {}
 
@@ -530,6 +534,23 @@ class MainWidget(widgets.QMainWindow):
         the state it has just after a restart.
         """
         # Stop auto refresh and unload the current ECU parameter view
+        self.unloadParamView()
+
+        # "Ecu Window" dock
+        self.treeview_ecu.clear()
+        self.ecunamemap = {}
+
+        # "Screen Window" dock
+        self.treeview_params.clear()
+        self.screennames = []
+
+        # Back to the default vehicle of the car list
+        if self.eculistwidget.vehicle_combo.count():
+            self.eculistwidget.vehicle_combo.setCurrentIndex(0)
+            self.eculistwidget.filterProject()
+
+    def unloadParamView(self):
+        """Stop and destroy the loaded ECU view and reset the actions depending on it."""
         options.auto_refresh = False
         self.autorefresh.setChecked(False)
         self.refresh.setEnabled(True)
@@ -545,12 +566,6 @@ class MainWidget(widgets.QMainWindow):
             self.paramview = None
         # Replace the removed parameter view by an empty widget
         self.scrollview.setWidget(widgets.QWidget())
-
-        # "Ecu Window" dock
-        self.treeview_ecu.clear()
-        self.ecunamemap = {}
-
-        # "Screen Window" dock
         self.treeview_params.clear()
         self.screennames = []
 
@@ -564,10 +579,58 @@ class MainWidget(widgets.QMainWindow):
         self.expert.setChecked(False)
         options.promode = False
 
-        # Back to the default vehicle of the car list
-        if self.eculistwidget.vehicle_combo.count():
-            self.eculistwidget.vehicle_combo.setCurrentIndex(0)
-            self.eculistwidget.filterProject()
+    def ecuListContextMenu(self, pos):
+        item = self.treeview_ecu.itemAt(pos)
+        if item is None:
+            return
+        menu = widgets.QMenu(self.treeview_ecu)
+        action = menu.addAction(_("Remove from list"))
+        if menu.exec_(self.treeview_ecu.viewport().mapToGlobal(pos)) is action:
+            self.removeEcuFromList(item)
+
+    def removeEcuFromList(self, item):
+        ecu_name = item.text()
+        row = self.treeview_ecu.row(item)
+        was_loaded = False
+        if self.paramview is not None:
+            was_loaded = getattr(self.paramview, 'ecu_name', None) == ecu_name
+        self.treeview_ecu.takeItem(row)
+        self.ecunamemap.pop(ecu_name, None)
+        if was_loaded:
+            self.unloadParamView()
+        if options.get_last_opened_ecu() == ecu_name:
+            options.set_last_opened_ecu(None)
+
+    def screenListContextMenu(self, pos):
+        item = self.treeview_params.itemAt(pos)
+        if item is None or self.paramview is None:
+            return
+        menu = widgets.QMenu(self.treeview_params)
+        action = menu.addAction(_("Remove screen") if item.parent() else _("Remove category"))
+        if menu.exec_(self.treeview_params.viewport().mapToGlobal(pos)) is action:
+            self.removeScreenFromList(item)
+
+    def removeScreenFromList(self, item):
+        if self.paramview is None:
+            return
+        name = item.text(0)
+        parent = item.parent()
+        if parent is not None:
+            self.paramview.removeScreen(name)
+            if name in self.screennames:
+                self.screennames.remove(name)
+            parent.removeChild(item)
+        else:
+            for i in range(item.childCount()):
+                child = item.child(i).text(0)
+                if child in self.screennames:
+                    self.screennames.remove(child)
+            self.paramview.removeCategory(name)
+            self.treeview_params.takeTopLevelItem(self.treeview_params.indexOfTopLevelItem(item))
+        if self.paramview.panel is None or not self.paramview.pagename:
+            self.diagaction.setEnabled(False)
+            self.hexinput.setEnabled(False)
+            self.cominput.setEnabled(False)
 
     def resetConfig(self):
         """Reset config"""
@@ -1121,6 +1184,8 @@ class MainWidget(widgets.QMainWindow):
             self.paramview.readDTC()
 
     def changeScreen(self, index):
+        if self.paramview is None:
+            return
         item = self.treeview_params.model().itemData(index)
 
         screen = item[0]
